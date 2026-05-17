@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>VIRO Egg Sticker Pro</title>
+
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+
+    <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet">
+
+    <style>
+        *, *::before, *::after { box-sizing: border-box; }
+        body {
+            font-family: 'DM Sans', sans-serif;
+            background: #f0f0ec;
+            min-height: 100vh;
+            margin: 0;
+        }
+        ::-webkit-scrollbar { width: 4px; height: 4px; }
+        ::-webkit-scrollbar-thumb { background: #ccc; border-radius: 10px; }
+
+        @media print {
+            .no-print { display: none !important; }
+            body { background: white; }
+        }
+
+        input:focus { outline: none; box-shadow: 0 0 0 2px rgba(0,0,0,0.12); }
+
+        .swatch {
+            width: 30px; height: 30px; border-radius: 50%;
+            cursor: pointer; border: 2px solid transparent;
+            transition: transform 0.15s, border-color 0.15s;
+        }
+        .swatch:hover { transform: scale(1.12); }
+        .swatch.active { border-color: #000; transform: scale(1.18); box-shadow: 0 0 0 2px #fff inset; }
+
+        .btn {
+            display: inline-flex; align-items: center; justify-content: center;
+            gap: 7px; padding: 13px 18px; border-radius: 12px;
+            font-weight: 700; font-size: 14px; cursor: pointer;
+            border: none; transition: all 0.18s; font-family: inherit;
+        }
+        .btn:active { transform: scale(0.96); }
+        .btn-green { background: #16a34a; color: white; }
+        .btn-green:hover { background: #15803d; }
+        .btn-blue { background: #4f46e5; color: white; }
+        .btn-blue:hover { background: #4338ca; }
+        .btn-gray { background: #f3f4f6; color: #374151; border: 1px solid #e5e7eb; }
+        .btn-gray:hover { background: #e5e7eb; }
+        .btn:disabled { opacity: 0.55; cursor: not-allowed; transform: none !important; }
+
+        .spinner {
+            width: 16px; height: 16px;
+            border: 2px solid rgba(255,255,255,0.35);
+            border-top-color: white; border-radius: 50%;
+            animation: spin 0.7s linear infinite; display: inline-block;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        #toast {
+            position: fixed; bottom: 24px; left: 50%;
+            transform: translateX(-50%) translateY(80px);
+            background: #111; color: white;
+            padding: 10px 22px; border-radius: 999px;
+            font-size: 13px; font-weight: 600; z-index: 9999;
+            transition: transform 0.28s ease, opacity 0.28s ease;
+            opacity: 0; pointer-events: none; white-space: nowrap;
+        }
+        #toast.show { transform: translateX(-50%) translateY(0); opacity: 1; }
+
+        .card {
+            background: #fff; border-radius: 16px;
+            border: 1px solid #e5e7eb; padding: 16px;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+        }
+        .card-label {
+            font-size: 11px; font-weight: 700; color: #9ca3af;
+            text-transform: uppercase; letter-spacing: 0.08em;
+            margin: 0 0 12px;
+        }
+        .field-label {
+            font-size: 12px; font-weight: 600; color: #374151;
+            display: block; margin-bottom: 4px;
+        }
+        .field-input {
+            width: 100%; padding: 9px 12px;
+            border: 1.5px solid #e5e7eb; border-radius: 8px;
+            font-size: 14px; font-family: inherit;
+            transition: border-color 0.15s, box-shadow 0.15s;
+        }
+        .field-input:focus { border-color: #6b7280; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    <div id="toast"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useCallback } = React;
+
+        // ── Constants ──────────────────────────────────────────────────
+        const SIZES = [
+            { id: 'small',  label: 'Small',  sub: '60×40mm',   w: 6,  h: 4  },
+            { id: 'medium', label: 'Medium', sub: '100×60mm',  w: 10, h: 6  },
+            { id: 'large',  label: 'Large',  sub: '150×100mm', w: 15, h: 10 },
+        ];
+
+        const COLORS = ['#ef4444','#22c55e','#3b82f6','#f59e0b','#8b5cf6','#141414'];
+        const PX_PER_CM = 37.795;
+
+        const DEFAULT = {
+            companyName:   'VIRO GGG DISTRIBUTOR',
+            contacts:      '+254 7XX XXX XXX',
+            productionDate: new Date().toISOString().split('T')[0],
+            shelfLifeDays: 30,
+            colorTheme:    '#ef4444',
+        };
+
+        // ── Helpers ────────────────────────────────────────────────────
+        function addDays(dateStr, days) {
+            const d = new Date(dateStr);
+            if (isNaN(d.getTime())) return '';
+            d.setDate(d.getDate() + Number(days) || 0);
+            return d.toISOString().split('T')[0];
+        }
+
+        function toast(msg, ms = 3000) {
+            const el = document.getElementById('toast');
+            if (!el) return;
+            el.textContent = msg;
+            el.classList.add('show');
+            setTimeout(() => el.classList.remove('show'), ms);
+        }
+
+        function safeJsonParse(str, fallback) {
+            try { return JSON.parse(str); } catch { return fallback; }
+        }
+
+        // ── Icon ───────────────────────────────────────────────────────
+        function Icon({ name, size = 18, color = 'currentColor', style = {} }) {
+            const ref = useRef(null);
+            useEffect(() => {
+                if (!ref.current || !window.lucide) return;
+                ref.current.innerHTML = '';
+                const i = document.createElement('i');
+                i.setAttribute('data-lucide', name);
+                i.style.cssText = `width:${size}px;height:${size}px;color:${color};display:block`;
+                ref.current.appendChild(i);
+                window.lucide.createIcons({ nodes: [i] });
+            }, [name, size, color]);
+            return <span ref={ref} style={{ display:'inline-flex', alignItems:'center', flexShrink:0, ...style }} />;
+        }
+
+        // ── Sticker (no side-effects, safe for html2canvas) ────────────
+        function Sticker({ data, size, stickerRef }) {
+            const W = size.w * PX_PER_CM;
+            const H = size.h * PX_PER_CM;
+            const u = H / 100; // scale unit
+
+            const fs = n => Math.max(7, u * n) + 'px';
+
+            return (
+                <div ref={stickerRef} style={{
+                    width: W, height: H, flexShrink: 0,
+                    border: `2.5px solid ${data.colorTheme}`,
+                    background: '#fff', borderRadius: 4,
+                    display: 'flex', flexDirection: 'column',
+                    padding: `${u*2}px ${u*2.5}px`,
+                    position: 'relative', overflow: 'hidden',
+                    boxShadow: '0 6px 28px rgba(0,0,0,0.13)',
+                }}>
+                    {/* BG watermark */}
+                    <div style={{
+                        position:'absolute', inset:0, display:'flex',
+                        alignItems:'center', justifyContent:'center',
+                        fontSize: u*55, opacity: 0.04, pointerEvents:'none',
+                        userSelect:'none',
+                    }}>🥚</div>
+
+                    {/* Header */}
+                    <div style={{
+                        display:'flex', justifyContent:'space-between', alignItems:'center',
+                        borderBottom: `2px solid ${data.colorTheme}`,
+                        paddingBottom: u*2, position:'relative', zIndex:1,
+                    }}>
+                        <span style={{
+                            fontFamily:'Syne,sans-serif', fontWeight:900,
+                            fontSize: fs(13), color: data.colorTheme,
+                            textTransform:'uppercase',
+                            overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap',
+                            maxWidth:'80%',
+                        }}>{data.companyName}</span>
+                        <div style={{
+                            background:'#fff', border:`1.5px solid ${data.colorTheme}`,
+                            borderRadius:'50%', padding: u*1.2,
+                            display:'flex', alignItems:'center', justifyContent:'center',
+                            flexShrink:0,
+                        }}>
+                            <Icon name="egg" size={u*11} color={data.colorTheme} />
+                        </div>
+                    </div>
+
+                    {/* Body */}
+                    <div style={{
+                        flex:1, display:'flex', flexDirection:'column',
+                        alignItems:'center', justifyContent:'center',
+                        position:'relative', zIndex:1, gap: u*2,
+                    }}>
+                        <p style={{ fontWeight:800, fontSize:fs(10), margin:0, letterSpacing:'-0.02em' }}>
+                            {data.contacts}
+                        </p>
+                        <div style={{
+                            background: data.colorTheme+'1a',
+                            borderRadius:4, padding:`${u*1.5}px ${u*4}px`,
+                        }}>
+                            <p style={{
+                                fontFamily:'Syne,sans-serif', fontWeight:800,
+                                fontStyle:'italic', fontSize:fs(12),
+                                color:data.colorTheme, textTransform:'uppercase', margin:0,
+                            }}>Fresh Farm Eggs</p>
+                        </div>
+                    </div>
+
+                    {/* Footer */}
+                    <div style={{
+                        display:'grid', gridTemplateColumns:'1fr 1fr',
+                        borderTop:`2px solid ${data.colorTheme}`,
+                        paddingTop: u*2, gap:4,
+                        position:'relative', zIndex:1,
+                    }}>
+                        <div style={{ textAlign:'center' }}>
+                            <p style={{ fontSize:fs(5), fontWeight:700, color:'#9ca3af', textTransform:'uppercase', margin:0 }}>Production</p>
+                            <p style={{ fontSize:fs(8.5), fontWeight:800, margin:0 }}>{data.productionDate}</p>
+                        </div>
+                        <div style={{
+                            background:data.colorTheme, borderRadius:4,
+                            textAlign:'center', padding:`${u}px ${u*2}px`, color:'#fff',
+                        }}>
+                            <p style={{ fontSize:fs(5), fontWeight:700, textTransform:'uppercase', margin:0, opacity:0.85 }}>Expiry</p>
+                            <p style={{ fontSize:fs(8.5), fontWeight:800, margin:0 }}>{data.expiryDate || '—'}</p>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // ── Main App ───────────────────────────────────────────────────
+        function App() {
+            const [form, setForm] = useState(() => ({
+                ...DEFAULT,
+                ...safeJsonParse(localStorage.getItem('viro_last'), {}),
+            }));
+            const [size, setSize]       = useState(SIZES[0]);
+            const [exporting, setExp]   = useState(false);
+            const [templates, setTpls]  = useState(() =>
+                safeJsonParse(localStorage.getItem('viro_v1'), [])
+            );
+            const stickerRef = useRef(null);
+
+            // Derived — no useState loop
+            const expiryDate = addDays(form.productionDate, form.shelfLifeDays);
+            const stickerData = { ...form, expiryDate };
+
+            // Persist last-used form
+            useEffect(() => {
+                try { localStorage.setItem('viro_last', JSON.stringify(form)); } catch {}
+            }, [form]);
+
+            const set = useCallback((k, v) => setForm(f => ({ ...f, [k]: v })), []);
+
+            // ── Templates ──────────────────────────────────────────────
+            const saveTemplate = () => {
+                const name = window.prompt('Template name:');
+                if (!name?.trim()) return;
+                const next = [...templates, { id: Date.now(), name: name.trim(), form }];
+                setTpls(next);
+                try { localStorage.setItem('viro_v1', JSON.stringify(next)); } catch {}
+                toast('✅ Template saved!');
+            };
+
+            const loadTemplate = t => {
+                setForm({ ...DEFAULT, ...t.form });
+                toast(`📂 Loaded: ${t.name}`);
+            };
+
+            const delTemplate = id => {
+                const next = templates.filter(t => t.id !== id);
+                setTpls(next);
+                try { localStorage.setItem('viro_v1', JSON.stringify(next)); } catch {}
+            };
+
+            // ── PDF Export (Android-safe blob method) ──────────────────
+            const exportPdf = async () => {
+                if (!stickerRef.current) return;
+                setExp(true);
+                try {
+                    const isMobile = /Android|iPhone|iPad/i.test(navigator.userAgent);
+                    const scale = isMobile ? 2 : 4; // FIX: lower scale on mobile to avoid OOM crash
+
+                    const canvas = await html2canvas(stickerRef.current, {
+                        scale,
+                        useCORS: true,
+                        allowTaint: true,
+                        backgroundColor: '#ffffff',
+                        logging: false,
+                        imageTimeout: 8000,
+                        removeContainer: true, // FIX: clean up tmp DOM nodes
+                    });
+
+                    // FIX: use JPEG not PNG — smaller file, safer on Android
+                    const imgData = canvas.toDataURL('image/jpeg', 0.92);
+
+                    const { jsPDF } = window.jspdf;
+                    const pdf = new jsPDF({ orientation:'portrait', unit:'mm', format:'a4' });
+
+                    const sw = size.w * 10; // mm
+                    const sh = size.h * 10;
+                    const margin = 8;
+                    const gap = 5;
+                    const pageW = 210;
+                    const pageH = 297;
+
+                    // FIX: auto-calculate grid safely so nothing overflows page
+                    const cols = Math.max(1, Math.floor((pageW - margin * 2 + gap) / (sw + gap)));
+                    const rows = Math.max(1, Math.floor((pageH - margin * 2 + gap) / (sh + gap)));
+                    const total = cols * rows;
+
+                    const startX = (pageW - (cols * sw + (cols - 1) * gap)) / 2;
+
+                    for (let i = 0; i < total; i++) {
+                        const c = i % cols;
+                        const r = Math.floor(i / cols);
+                        pdf.addImage(imgData, 'JPEG', startX + c * (sw + gap), margin + r * (sh + gap), sw, sh);
+                    }
+
+                    // FIX: blob URL download — works on Android Chrome (pdf.save() does NOT)
+                    const blob = pdf.output('blob');
+                    const url  = URL.createObjectURL(blob);
+                    const a    = document.createElement('a');
+                    a.href     = url;
+                    a.download = `VIRO_${size.label}_Stickers.pdf`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    setTimeout(() => URL.revokeObjectURL(url), 8000);
+
+                    toast(`✅ ${total} stickers exported as PDF!`);
+                } catch (err) {
+                    console.error(err);
+                    toast('❌ Export failed — use Print instead');
+                } finally {
+                    setExp(false);
+                }
+            };
+
+            // ── Render ─────────────────────────────────────────────────
+            return (
+                <div style={{ maxWidth:960, margin:'0 auto', padding:16 }}>
+
+                    {/* Header */}
+                    <div className="no-print" style={{ display:'flex', alignItems:'center', gap:10, borderBottom:'2px solid #e5e7eb', paddingBottom:16, marginBottom:24 }}>
+                        <div style={{ background:'#ef4444', borderRadius:8, padding:8, display:'flex' }}>
+                            <Icon name="egg" size={22} color="white" />
+                        </div>
+                        <div>
+                            <h1 style={{ fontFamily:'Syne,sans-serif', fontWeight:900, fontSize:20, margin:0, textTransform:'uppercase', letterSpacing:'-0.03em' }}>
+                                VIRO Egg Sticker Pro
+                            </h1>
+                            <p style={{ fontSize:12, color:'#6b7280', margin:0 }}>Design · Preview · Print · Export</p>
+                        </div>
+                    </div>
+
+                    <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(290px, 1fr))', gap:24 }}>
+
+                        {/* ── Controls ── */}
+                        <div className="no-print" style={{ display:'flex', flexDirection:'column', gap:14 }}>
+
+                            {/* Details card */}
+                            <div className="card">
+                                <p className="card-label">Sticker Details</p>
+                                <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+
+                                    <div>
+                                        <label className="field-label">Company Name</label>
+                                        <input className="field-input" type="text"
+                                            value={form.companyName}
+                                            onChange={e => set('companyName', e.target.value)} />
+                                    </div>
+
+                                    <div>
+                                        <label className="field-label">Phone / Contacts</label>
+                                        <input className="field-input" type="tel"
+                                            value={form.contacts}
+                                            onChange={e => set('contacts', e.target.value)} />
+                                    </div>
+
+                                    <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+                                        <div>
+                                            <label className="field-label">Production Date</label>
+                                            <input className="field-input" type="date"
+                                                value={form.productionDate}
+                                                onChange={e => set('productionDate', e.target.value)} />
+                                        </div>
+                                        <div>
+                                            <label className="field-label">Shelf Life (days)</label>
+                                            <input className="field-input" type="number" min="1" max="365"
+                                                value={form.shelfLifeDays}
+                                                onChange={e => set('shelfLifeDays', Math.max(1, parseInt(e.target.value)||1))} />
+                                        </div>
+                                    </div>
+
+                                    {/* Expiry preview */}
+                                    <div style={{ background:'#f9fafb', borderRadius:8, padding:'8px 12px', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                                        <span style={{ fontSize:12, color:'#6b7280', fontWeight:600 }}>→ Expiry Date</span>
+                                        <span style={{ fontSize:15, fontWeight:800, color:form.colorTheme }}>{expiryDate || '—'}</span>
+                                    </div>
+
+                                    {/* Colors */}
+                                    <div>
+                                        <p className="field-label" style={{ marginBottom:8 }}>Color Theme</p>
+                                        <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+                                            {COLORS.map(c => (
+                                                <div key={c} className={`swatch${form.colorTheme===c?' active':''}`}
+                                                    style={{ backgroundColor:c }} onClick={() => set('colorTheme', c)} />
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Size card */}
+                            <div className="card">
+                                <p className="card-label">Sticker Size</p>
+                                <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+                                    {SIZES.map(s => (
+                                        <button key={s.id} onClick={() => setSize(s)} style={{
+                                            padding:'8px 14px', borderRadius:10,
+                                            border: size.id===s.id ? 'none' : '1.5px solid #e5e7eb',
+                                            background: size.id===s.id ? '#111' : '#fff',
+                                            color: size.id===s.id ? '#fff' : '#6b7280',
+                                            fontWeight:700, fontSize:12, cursor:'pointer',
+                                            fontFamily:'inherit', transition:'all 0.15s',
+                                        }}>
+                                            {s.label} <span style={{ opacity:0.6, fontWeight:500 }}>{s.sub}</span>
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Templates card */}
+                            <div className="card">
+                                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12 }}>
+                                    <p className="card-label" style={{ margin:0 }}>Templates</p>
+                                    <button onClick={saveTemplate} className="btn btn-gray" style={{ padding:'6px 12px', borderRadius:8, fontSize:12 }}>
+                                        <Icon name="save" size={13} /> Save
+                                    </button>
+                                </div>
+                                {templates.length === 0
+                                    ? <p style={{ fontSize:13, color:'#9ca3af', textAlign:'center', padding:'10px 0', margin:0 }}>No templates saved yet</p>
+                                    : <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+                                        {templates.map(t => (
+                                            <div key={t.id} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'8px 10px', background:'#f9fafb', borderRadius:8, border:'1px solid #e5e7eb' }}>
+                                                <span style={{ fontSize:13, fontWeight:600 }}>{t.name}</span>
+                                                <div style={{ display:'flex', gap:6 }}>
+                                                    <button onClick={() => loadTemplate(t)} style={{ fontSize:11, fontWeight:700, color:'#4f46e5', background:'#ede9fe', border:'none', borderRadius:6, padding:'4px 9px', cursor:'pointer' }}>Load</button>
+                                                    <button onClick={() => delTemplate(t.id)} style={{ fontSize:11, fontWeight:700, color:'#ef4444', background:'#fef2f2', border:'none', borderRadius:6, padding:'4px 9px', cursor:'pointer' }}>✕</button>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                }
+                            </div>
+                        </div>
+
+                        {/* ── Preview + Actions ── */}
+                        <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:18 }}>
+                            <div style={{ width:'100%', overflowX:'auto', display:'flex', justifyContent:'center', padding:'14px 8px' }}>
+                                <Sticker data={stickerData} size={size} stickerRef={stickerRef} />
+                            </div>
+
+                            <div className="no-print" style={{ background:'#f3f4f6', borderRadius:8, padding:'5px 14px', fontSize:12, color:'#6b7280', fontWeight:600 }}>
+                                {size.label} — {size.w}cm × {size.h}cm
+                            </div>
+
+                            <div className="no-print" style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, width:'100%', maxWidth:380 }}>
+                                <button onClick={() => window.print()} className="btn btn-green">
+                                    <Icon name="printer" size={15} color="white" /> Print Page
+                                </button>
+                                <button onClick={exportPdf} className="btn btn-blue" disabled={exporting}>
+                                    {exporting
+                                        ? <><span className="spinner" /> Building...</>
+                                        : <><Icon name="file-down" size={15} color="white" /> Get PDF</>
+                                    }
+                                </button>
+                            </div>
+
+                            <p className="no-print" style={{ fontSize:11, color:'#9ca3af', textAlign:'center', maxWidth:320, lineHeight:1.6, margin:0 }}>
+                                💡 <strong>Android tip:</strong> Tap <em>Print Page</em> → choose <em>Save as PDF</em> for best results. PDF export also works on Chrome Android.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+
+        // Init icons after first paint
+        setTimeout(() => { if (window.lucide) window.lucide.createIcons(); }, 150);
+    </script>
+</body>
+</html>
